@@ -64,6 +64,8 @@ public:
 
         wowState = 0.0f;
         flutterState = 0.0f;
+        wowSmooth = 0.0f;
+        flutterSmooth = 0.0f;
 
         headBumpL.reset();
         headBumpR.reset();
@@ -115,18 +117,18 @@ public:
         const float targetMakeup    = 1.0f / std::max(1.0f, std::pow(targetDriveGain, 0.50f));
         const float targetActive    = bypassed ? 0.0f : 1.0f;
 
-        // Wow & Flutter stochastic coefficients
+        // Wow & Flutter stochastic coefficients (Ornstein-Uhlenbeck with stationary RMS sigmaW=0.65, sigmaF=0.25)
         const float speedRatio = (speedMode == 1) ? 1.0f : 0.5f;
         const float thetaW = 2.0f * juce::MathConstants<float>::pi * 1.0f;
         const float thetaF = 2.0f * juce::MathConstants<float>::pi * (9.5f * speedRatio);
 
-        const float expW = std::exp(-thetaW * (float)invSampleRate);
-        const float expF = std::exp(-thetaF * (float)invSampleRate);
+        const float expW = std::exp(-thetaW * static_cast<float>(invSampleRate));
+        const float expF = std::exp(-thetaF * static_cast<float>(invSampleRate));
 
-        const float sigmaW = 0.0012f;
-        const float sigmaF = 0.00045f;
-        const float stdW = sigmaW * std::sqrt(std::max(0.0f, (1.0f - expW * expW) / (2.0f * thetaW)));
-        const float stdF = sigmaF * std::sqrt(std::max(0.0f, (1.0f - expF * expF) / (2.0f * thetaF)));
+        const float sigmaW = 0.65f;
+        const float sigmaF = 0.25f;
+        const float stdW = sigmaW * std::sqrt(std::max(0.0f, 1.0f - expW * expW));
+        const float stdF = sigmaF * std::sqrt(std::max(0.0f, 1.0f - expF * expF));
 
         // DC block filter coefficient (fc = 2.5 Hz)
         const float dcR = juce::jlimit(0.99f, 0.99995f,
@@ -154,6 +156,9 @@ public:
             wowState     = juce::jlimit(-2.0f, 2.0f, wowState * expW + stdW * noiseW);
             flutterState = juce::jlimit(-2.0f, 2.0f, flutterState * expF + stdF * noiseF);
 
+            wowSmooth     += (1.0f - expW) * (wowState - wowSmooth);
+            flutterSmooth += (1.0f - expF) * (flutterState - flutterSmooth);
+
             delayBufferL[writeIndex] = inL;
             delayBufferR[writeIndex] = inR;
 
@@ -162,7 +167,7 @@ public:
             const float centerDelay = 24.0f;
             float modDepth          = 14.0f * smoothFlutter;
             float modDelay          = juce::jlimit(4.0f, static_cast<float>(delayBufferSize - 8),
-                                                   centerDelay + (wowState + flutterState) * modDepth);
+                                                   centerDelay + (wowSmooth + flutterSmooth) * modDepth);
 
             float delayedL = readHermite4(delayBufferL.data(), delayBufferSize, static_cast<float>(writeIndex) - modDelay);
             float delayedR = readHermite4(delayBufferR.data(), delayBufferSize, static_cast<float>(writeIndex) - modDelay);
@@ -285,6 +290,8 @@ private:
     // Stochastic transport states
     float wowState = 0.0f;
     float flutterState = 0.0f;
+    float wowSmooth = 0.0f;
+    float flutterSmooth = 0.0f;
     std::mt19937 prng;
     std::normal_distribution<float> normalDist { 0.0f, 1.0f };
 

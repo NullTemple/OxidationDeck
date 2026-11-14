@@ -35,6 +35,12 @@ public:
         dryDelayBufferL.assign(maxDelaySamples, 0.0f);
         dryDelayBufferR.assign(maxDelaySamples, 0.0f);
         peakLookaheadBuffer.assign(maxDelaySamples, 1.0f);
+        minDeque.assign(maxDelaySamples, 0);
+
+        kShelfL.setKHighShelf(currentSampleRate);
+        kShelfR.setKHighShelf(currentSampleRate);
+        kRlbL.setKRlbHighPass(currentSampleRate);
+        kRlbR.setKRlbHighPass(currentSampleRate);
 
         smoothLookahead = static_cast<float>(juce::jlimit(8, fixedLookaheadSamples, juce::roundToInt(0.002 * currentSampleRate)));
         reset();
@@ -54,8 +60,16 @@ public:
             std::fill(peakLookaheadBuffer.begin(), peakLookaheadBuffer.end(), 1.0f);
 
         writeIndex = 0;
+        dequeHead = 0;
+        dequeSize = 0;
+        prevLookaheadInt = -1;
         currentGain = 1.0f;
         smoothedGR = 0.0f;
+
+        kShelfL.reset();
+        kShelfR.reset();
+        kRlbL.reset();
+        kRlbR.reset();
 
         prevSampleL = 0.0f;
         prevSampleR = 0.0f;
@@ -163,25 +177,60 @@ public:
 
             peakLookaheadBuffer[writeIndex] = sampleTargetGain;
 
-            // 3. Scan lookahead window forward from readIdx & compute exact distance-weighted slope
+            // 3. O(1) Monotonic Deque Lookahead Window Scan
             int readIdx = (writeIndex - fixedLookaheadSamples + maxDelaySamples) % maxDelaySamples;
+
+            if (lookaheadInt != prevLookaheadInt)
+            {
+                // Rebuild deque only when lookaheadInt changes (e.g. while dragging Lookahead knob)
+                dequeHead = 0;
+                dequeSize = 0;
+                for (int k = 0; k <= lookaheadInt; ++k)
+                {
+                    int idx = readIdx + k;
+                    if (idx >= maxDelaySamples)
+                        idx -= maxDelaySamples;
+                    pushDequeBack(idx, peakLookaheadBuffer[idx]);
+                }
+                prevLookaheadInt = lookaheadInt;
+            }
+            else
+            {
+                // Evict expired front index (readIdx - 1)
+                int expiredIdx = (readIdx - 1 + maxDelaySamples) % maxDelaySamples;
+                while (dequeSize > 0 && minDeque[dequeHead] == expiredIdx)
+                {
+                    dequeHead = (dequeHead + 1) % maxDelaySamples;
+                    --dequeSize;
+                }
+                // Push newly entering horizon index (readIdx + lookaheadInt)
+                int enterIdx = readIdx + lookaheadInt;
+                if (enterIdx >= maxDelaySamples)
+                    enterIdx -= maxDelaySamples;
+                pushDequeBack(enterIdx, peakLookaheadBuffer[enterIdx]);
+            }
+
             float windowMinGain = 1.0f;
             float requiredSlope = 0.0f;
-            for (int k = 0; k <= lookaheadInt; ++k)
+            if (dequeSize > 0)
             {
-                int idx = readIdx + k;
-                if (idx >= maxDelaySamples)
-                    idx -= maxDelaySamples;
-                float g = peakLookaheadBuffer[idx];
-                if (g < windowMinGain)
-                    windowMinGain = g;
-                if (g < currentGain)
+                int minIdx = minDeque[dequeHead];
+                windowMinGain = peakLookaheadBuffer[minIdx];
+                if (windowMinGain < currentGain)
                 {
-                    float slope = (currentGain - g) / static_cast<float>(std::max(1, k));
-                    if (slope > requiredSlope)
-                        requiredSlope = slope;
+                    int distToExit = minIdx - readIdx;
+                    if (distToExit < 0)
+                        distToExit += maxDelaySamples;
+                    requiredSlope = (currentGain - windowMinGain) / static_cast<float>(std::max(1, distToExit));
                 }
             }
+
+            // Ensure immediate exiting sample at readIdx also enforces zero-overshoot slope
+            float exitGain = peakLookaheadBuffer[readIdx];
+            if (exitGain < windowMinGain)
+                windowMinGain = exitGain;
+            if (exitGain < currentGain)
+                requiredSlope = std::max(requiredSlope, currentGain - exitGain);
 
             // 4. Smooth Gain Ballistics (reaches exact peak attenuation right as peak exits delay line)
             if (windowMinGain < currentGain)
@@ -227,14 +276,16 @@ public:
             left[i]  = yOutL;
             right[i] = yOutR;
 
-            // Telemetry accumulation
+            // Telemetry accumulation (ITU-R BS.1770-4 K-weighted loudness sidechain)
             float grDb = (!bypassed && currentGain < 0.999f) ? (20.0f * std::log10(currentGain)) : 0.0f;
             maxGRThisBlock = std::min(maxGRThisBlock, grDb);
 
             float outPeakSample = std::max(std::abs(yOutL), std::abs(yOutR));
             peakThisBlock = std::max(peakThisBlock, outPeakSample);
 
-            energyBlock += (yOutL * yOutL + yOutR * yOutR) * 0.5f;
+            float kL = kRlbL.processSample(kShelfL.processSample(yOutL));
+            float kR = kRlbR.processSample(kShelfR.processSample(yOutR));
+            energyBlock += (kL * kL + kR * kR) * 0.5f;
         }
 
         // Telemetry Update
@@ -315,7 +366,77 @@ private:
     std::vector<float> dryDelayBufferL;
     std::vector<float> dryDelayBufferR;
     std::vector<float> peakLookaheadBuffer;
+    std::vector<int> minDeque;
     int writeIndex = 0;
+    int dequeHead = 0;
+    int dequeSize = 0;
+    int prevLookaheadInt = -1;
+
+    inline void pushDequeBack(int bufIdx, float gainVal) noexcept
+    {
+        while (dequeSize > 0)
+        {
+            int backSlot = (dequeHead + dequeSize - 1) % maxDelaySamples;
+            if (peakLookaheadBuffer[minDeque[backSlot]] >= gainVal)
+                --dequeSize;
+            else
+                break;
+        }
+        int tailSlot = (dequeHead + dequeSize) % maxDelaySamples;
+        minDeque[tailSlot] = bufIdx;
+        ++dequeSize;
+    }
+
+    struct KFilterBiquad
+    {
+        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f;
+        float a1 = 0.0f, a2 = 0.0f;
+        float z1 = 0.0f, z2 = 0.0f;
+
+        void reset() noexcept { z1 = 0.0f; z2 = 0.0f; }
+
+        inline float processSample(float x) noexcept
+        {
+            float y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
+        }
+
+        void setKHighShelf(double fs) noexcept
+        {
+            // ITU-R BS.1770-4 Stage 1 acoustic head high-shelf: f0 = 1681.97445 Hz, G = +3.99984385 dB, Q = 0.707175237
+            const double f0 = 1681.974450955533;
+            const double G  = 3.999843853973347;
+            const double Q  = 0.7071752369554196;
+            const double K  = std::tan(juce::MathConstants<double>::pi * f0 / std::max(8000.0, fs));
+            const double Vh = std::pow(10.0, G / 20.0);
+            const double Vb = std::pow(Vh, 0.4996667741545416);
+            const double a0 = 1.0 + K / Q + K * K;
+            b0 = static_cast<float>((Vh + Vb * K / Q + K * K) / a0);
+            b1 = static_cast<float>((2.0 * (K * K - Vh)) / a0);
+            b2 = static_cast<float>((Vh - Vb * K / Q + K * K) / a0);
+            a1 = static_cast<float>((2.0 * (K * K - 1.0)) / a0);
+            a2 = static_cast<float>((1.0 - K / Q + K * K) / a0);
+        }
+
+        void setKRlbHighPass(double fs) noexcept
+        {
+            // ITU-R BS.1770-4 Stage 2 RLB high-pass: f0 = 38.13547087602444 Hz, Q = 0.5003270373238773
+            const double f0 = 38.13547087602444;
+            const double Q  = 0.5003270373238773;
+            const double K  = std::tan(juce::MathConstants<double>::pi * f0 / std::max(8000.0, fs));
+            const double a0 = 1.0 + K / Q + K * K;
+            b0 = static_cast<float>(1.0 / a0);
+            b1 = static_cast<float>(-2.0 / a0);
+            b2 = static_cast<float>(1.0 / a0);
+            a1 = static_cast<float>((2.0 * (K * K - 1.0)) / a0);
+            a2 = static_cast<float>((1.0 - K / Q + K * K) / a0);
+        }
+    };
+
+    KFilterBiquad kShelfL, kShelfR;
+    KFilterBiquad kRlbL, kRlbR;
 
     float currentGain = 1.0f;
     float smoothedGR  = 0.0f;
