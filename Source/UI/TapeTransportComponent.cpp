@@ -31,14 +31,14 @@ void TapeTransportComponent::timerCallback()
 {
     if (running)
     {
-        // Reel rotation speed (30 IPS vs 15 IPS)
+        // Reel rotation speed (30 IPS vs 15 IPS, both clockwise)
         leftReelAngle  += 0.024f * speedMultiplier;
-        rightReelAngle -= 0.027f * speedMultiplier;
+        rightReelAngle += 0.027f * speedMultiplier;
 
         if (leftReelAngle > juce::MathConstants<float>::twoPi)
             leftReelAngle -= juce::MathConstants<float>::twoPi;
-        if (rightReelAngle < -juce::MathConstants<float>::twoPi)
-            rightReelAngle += juce::MathConstants<float>::twoPi;
+        if (rightReelAngle > juce::MathConstants<float>::twoPi)
+            rightReelAngle -= juce::MathConstants<float>::twoPi;
     }
 
     // Ballistics smoothing for live flux core glow
