@@ -103,6 +103,13 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
             param->setValueNotifyingHost(1.0f);
     };
 
+    masterBypassBtn.setButtonText("BYPASS");
+    masterBypassBtn.setClickingTogglesState(true);
+    masterBypassBtn.setTooltip("Master Bypass (Latency-Compensated A/B Compare)");
+    canvas.addAndMakeVisible(masterBypassBtn);
+    masterBypassAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        processorRef.getAPVTS(), IDs::bypass.getParamID(), masterBypassBtn);
+
     // Decks & Swap Callbacks
     canvas.addAndMakeVisible(deck1);
     canvas.addAndMakeVisible(deck2);
@@ -128,6 +135,7 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
     deck3.onSwapRight = [swapDeckByType]() { swapDeckByType(2); };
     deck4.onResetClips = [this]() { processorRef.resetLimiterClips(); };
 
+    processorRef.getAPVTS().addParameterListener(IDs::bypass.getParamID(), this);
     processorRef.getAPVTS().addParameterListener(IDs::chainOrder.getParamID(), this);
     processorRef.getAPVTS().addParameterListener(IDs::oversample.getParamID(), this);
     processorRef.getAPVTS().addParameterListener(IDs::routingMode.getParamID(), this);
@@ -159,10 +167,30 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
 OxidationDeckAudioProcessorEditor::~OxidationDeckAudioProcessorEditor()
 {
     stopTimer();
+    processorRef.getAPVTS().removeParameterListener(IDs::bypass.getParamID(), this);
     processorRef.getAPVTS().removeParameterListener(IDs::chainOrder.getParamID(), this);
     processorRef.getAPVTS().removeParameterListener(IDs::oversample.getParamID(), this);
     processorRef.getAPVTS().removeParameterListener(IDs::routingMode.getParamID(), this);
     setLookAndFeel(nullptr);
+}
+
+void OxidationDeckAudioProcessorEditor::mouseDown(const juce::MouseEvent& event)
+{
+    const float scaleX = static_cast<float>(getWidth())  / static_cast<float>(kBaseWidth);
+    const float scaleY = static_cast<float>(getHeight()) / static_cast<float>(kBaseHeight);
+    const float baseX  = static_cast<float>(event.x) / std::max(0.01f, scaleX);
+    const float baseY  = static_cast<float>(event.y) / std::max(0.01f, scaleY);
+
+    if (baseX >= 24.0f && baseX <= 160.0f && baseY >= 6.0f && baseY <= 46.0f)
+    {
+        if (auto* p = processorRef.getAPVTS().getParameter(IDs::bypass.getParamID()))
+        {
+            const float nextVal = (p->getValue() > 0.5f) ? 0.0f : 1.0f;
+            p->beginChangeGesture();
+            p->setValueNotifyingHost(nextVal);
+            p->endChangeGesture();
+        }
+    }
 }
 
 void OxidationDeckAudioProcessorEditor::parameterChanged(const juce::String&, float)
@@ -292,6 +320,10 @@ void OxidationDeckAudioProcessorEditor::resized()
     // Header controls aligned right
     auto rightHeader = headerArea.removeFromRight(860);
 
+    auto bypassArea = rightHeader.removeFromRight(62).reduced(0, 8);
+    masterBypassBtn.setBounds(bypassArea);
+    rightHeader.removeFromRight(10);
+
     auto msArea = rightHeader.removeFromRight(112).reduced(0, 8);
     stereoBtn.setBounds(msArea.removeFromLeft(56));
     msBtn.setBounds(msArea);
@@ -401,10 +433,14 @@ void OxidationDeckAudioProcessorEditor::paint(juce::Graphics& g)
     drawChassisFooter(g, footerRect);
 
     // Glowing Signal-Flow Conduit Chevrons between the 4 Deck Bays
+    auto* bpParam = processorRef.getAPVTS().getRawParameterValue(IDs::bypass.getParamID());
+    bool isMasterBypassed = (bpParam != nullptr && bpParam->load() > 0.5f);
     auto decksArea = innerBounds.reduced(5.0f, 5.0f);
     float deckW = (decksArea.getWidth() - 18.0f) / 4.0f;
     float midDeckY = decksArea.getCentreY();
-    float sigActivity = juce::jlimit(0.25f, 1.0f, 0.30f + juce::jmax(smoothInL, smoothOutL) * 1.2f);
+    float sigActivity = isMasterBypassed
+        ? 0.12f
+        : juce::jlimit(0.25f, 1.0f, 0.30f + juce::jmax(smoothInL, smoothOutL) * 1.2f);
 
     for (int gapIdx = 0; gapIdx < 3; ++gapIdx)
     {
@@ -424,6 +460,9 @@ void OxidationDeckAudioProcessorEditor::paint(juce::Graphics& g)
 
 void OxidationDeckAudioProcessorEditor::drawChassisHeader(juce::Graphics& g, juce::Rectangle<int> area)
 {
+    auto* bpParam = processorRef.getAPVTS().getRawParameterValue(IDs::bypass.getParamID());
+    bool isMasterBypassed = (bpParam != nullptr && bpParam->load() > 0.5f);
+
     auto fArea = area.toFloat();
 
     // Background
@@ -437,26 +476,30 @@ void OxidationDeckAudioProcessorEditor::drawChassisHeader(juce::Graphics& g, juc
     g.setColour(juce::Colour::fromRGB(200, 176, 221).withAlpha(0.08f));
     g.drawHorizontalLine(area.getY() + 1, (float)area.getX() + 4.0f, (float)area.getRight() - 4.0f);
 
-    // Left: Amber Tally LED
+    // Left: Amber Tally LED (dims when Master Bypassed; click LED/logo to toggle)
     float tallyX = (float)area.getX() + 14.0f;
     float tallyY = (float)area.getCentreY();
 
-    g.setColour(MauveTheme::amber.withAlpha(0.45f));
-    g.fillEllipse(tallyX - 5.5f, tallyY - 5.5f, 11.0f, 11.0f);
+    if (!isMasterBypassed)
+    {
+        g.setColour(MauveTheme::amber.withAlpha(0.45f));
+        g.fillEllipse(tallyX - 5.5f, tallyY - 5.5f, 11.0f, 11.0f);
+    }
 
-    g.setColour(MauveTheme::amberBright);
+    g.setColour(isMasterBypassed ? juce::Colour::fromRGB(65, 42, 85) : MauveTheme::amberBright);
     g.fillEllipse(tallyX - 3.0f, tallyY - 3.0f, 6.0f, 6.0f);
 
     // Brand Name
-    g.setColour(MauveTheme::textBright);
+    g.setColour(isMasterBypassed ? MauveTheme::silkscreen : MauveTheme::textBright);
     g.setFont(juce::FontOptions(13.5f, juce::Font::bold));
     g.drawText("MAUVE ZONE", juce::Rectangle<float>(tallyX + 13.0f, (float)area.getY(), 105.0f, (float)area.getHeight()),
                juce::Justification::centredLeft, false);
 
     // Model
-    g.setColour(MauveTheme::amberBright);
+    g.setColour(isMasterBypassed ? MauveTheme::silkscreen : MauveTheme::amberBright);
     g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
-    g.drawText("MZOD-1 // MASTER BUS", juce::Rectangle<float>(tallyX + 114.0f, (float)area.getY(), 165.0f, (float)area.getHeight()),
+    g.drawText(isMasterBypassed ? "MZOD-1 // BYPASSED" : "MZOD-1 // MASTER BUS",
+               juce::Rectangle<float>(tallyX + 114.0f, (float)area.getY(), 165.0f, (float)area.getHeight()),
                juce::Justification::centredLeft, false);
 
     // CHAIN label

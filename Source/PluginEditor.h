@@ -18,6 +18,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void mouseDown(const juce::MouseEvent& event) override;
 
     static constexpr int kBaseWidth  = 1220;
     static constexpr int kBaseHeight = 570;
@@ -44,6 +45,9 @@ private:
 
     juce::TextButton stereoBtn;
     juce::TextButton msBtn;
+
+    juce::TextButton masterBypassBtn;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> masterBypassAttach;
 
     // The 4 Deck Panels
     Deck1Preamp   deck1;

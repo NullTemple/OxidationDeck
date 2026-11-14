@@ -434,7 +434,8 @@ void OxidationDeckAudioProcessor::applyFactoryPreset(int programIndex)
         }
     };
 
-    // Ensure all decks active by default on preset load
+    // Ensure all decks and master bus are active by default on preset load
+    setParam(IDs::bypass, 0.0f);
     setParam(IDs::deck1Bypass, 0.0f);
     setParam(IDs::deck2Bypass, 0.0f);
     setParam(IDs::deck3Bypass, 0.0f);
