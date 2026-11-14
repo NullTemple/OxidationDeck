@@ -9,8 +9,19 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-# Standard official JUCE link to local C:/JUCE installation without duplicating files
-add_subdirectory("C:/JUCE" "${CMAKE_CURRENT_BINARY_DIR}/JUCE" EXCLUDE_FROM_ALL)
+# Use JUCE 8.0.4 (matching Derive) to avoid the JUCE 9.0.4 Windows VST3 multi-monitor DPI hit-test bug.
+if(EXISTS "C:/Users/xaris/Derive/build/_deps/juce-src/CMakeLists.txt")
+    add_subdirectory("C:/Users/xaris/Derive/build/_deps/juce-src" "${CMAKE_CURRENT_BINARY_DIR}/JUCE" EXCLUDE_FROM_ALL)
+else()
+    include(FetchContent)
+    FetchContent_Declare(
+        JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG        8.0.4
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(JUCE)
+endif()
 
 juce_add_plugin(MZOD1
     COMPANY_NAME "Mauve Zone"
@@ -23,7 +34,7 @@ juce_add_plugin(MZOD1
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     NEEDS_WEB_BROWSER FALSE
     NEEDS_CURL FALSE)

@@ -303,9 +303,8 @@ void OxidationDeckAudioProcessorEditor::timerCallback()
 
 void OxidationDeckAudioProcessorEditor::resized()
 {
-    contentPanel.setTransform(juce::AffineTransform());
-    contentPanel.setBounds(0, 0, kBaseWidth, kBaseHeight);
     contentPanel.setTransform(juce::AffineTransform::scale(uiScale));
+    contentPanel.setBounds(0, 0, kBaseWidth, kBaseHeight);
     resizedContent();
 }
 

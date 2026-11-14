@@ -74,15 +74,19 @@ Every unit of work follows a strict 4-step pipeline:
 
 ---
 
-### 5. Multi-Monitor DPI & VST3 UI Scaling Standard (`Derive` ContentPanel Pattern)
+### 5. Multi-Monitor DPI & VST3 UI Scaling Standard (`Derive` JUCE 8.0.4 + ContentPanel Pattern)
 
-To guarantee rock-solid mouse hit-testing across Windows monitors with mixed DPI settings and screen resolutions, all Mauve Zone JUCE plugins standardize on the **`Derive` `ContentPanel` + `applyUiScale` architecture**:
+To guarantee rock-solid mouse hit-testing across Windows monitors with mixed DPI settings and screen resolutions, all Mauve Zone JUCE plugins must link against **JUCE 8.0.4** and standardize on the **`Derive` `ContentPanel` + `applyUiScale` architecture**:
 
-1. **Avoid Constrainer-Based Window Resizing in VST3:**
+1. **Pin JUCE 8.0.4 (Avoid `C:/JUCE` 9.0.4 Windows VST3 DPI Bug):**
+   * `C:/JUCE` on this system is **JUCE 9.0.4**, which breaks Windows VST3 mouse hit-testing when dragging plugin windows across monitors with different DPI/resolutions.
+   * **`Derive` works because it compiles against JUCE 8.0.4** (`GIT_TAG 8.0.4`, cached locally at `C:/Users/xaris/Derive/build/_deps/juce-src`) alongside the `ContentPanel` pattern and `EDITOR_WANTS_KEYBOARD_FOCUS FALSE`.
+   * All Mauve Zone CMake plugins on this machine must link against **JUCE 8.0.4** rather than `C:/JUCE` (9.0.4), and configure `EDITOR_WANTS_KEYBOARD_FOCUS FALSE`.
+2. **Avoid Constrainer-Based Window Resizing in VST3:**
    * Do **not** use `setResizable(true, true)`, `setResizeLimits(...)`, `setFixedAspectRatio(...)`, or `getPrimaryDisplay()` auto-shrinking in `AudioProcessorEditor`. During cross-monitor dragging (`WM_DPICHANGED` / VST3 `IPlugViewContentScaleSupport`), host DPI updates conflict with JUCE bounds constrainers and break mouse hit-testing against `HWND` client coordinates.
-2. **Unified `ContentPanel` Coordinate Space:**
+3. **Unified `ContentPanel` Coordinate Space:**
    * Keep the outer `AudioProcessorEditor` as a lightweight host frame (`paint` only fills `spaceBg`) and host all custom painting (`paintContent`), child controls (`resizedContent`), and canvas click handlers (`mouseDownContent`) inside a single `ContentPanel` child component with default hit-testing (`setInterceptsMouseClicks(true, true)`—never `false, true`).
-   * Reset `contentPanel.setTransform(juce::AffineTransform())` before `contentPanel.setBounds(0, 0, kBaseWidth, kBaseHeight)`, then apply `contentPanel.setTransform(juce::AffineTransform::scale(uiScale))` and invoke `resizedContent()`.
-3. **Explicit User UI Scale Selector (`75% / 100% / 125%`):**
+   * In `Editor::resized()`, apply `contentPanel.setTransform(juce::AffineTransform::scale(uiScale)); contentPanel.setBounds(0, 0, kBaseWidth, kBaseHeight); resizedContent();`.
+4. **Explicit User UI Scale Selector (`75% / 100% / 125%`):**
    * Provide a `scaleBox` selector in the top utility bar that drives `applyUiScale(float newScale)` (`setSize(std::round(kBaseWidth * uiScale), std::round(kBaseHeight * uiScale)); resized();`), allowing users to downscale cleanly on smaller displays while leaving per-monitor OS DPI scaling intact.
 
