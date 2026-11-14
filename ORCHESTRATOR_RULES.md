@@ -41,3 +41,20 @@ A hand-back (`enter_plan_mode`) from Junior to the Orchestrator doubles Planning
 1. **Batch Parallel Tool Calls:** If the Orchestrator must read 2 files, read them in a **single parallel turn**, never sequentially across multiple turns.
 2. **Keep Plans Compact & High-Signal:** Do not paste hundreds of lines of unchanged boilerplate code into `exit_plan_mode`. Specify only the target lines/blocks and the exact delta.
 3. **Recommend `/compact` or Fresh Threads at Milestones:** When a thread accumulates a large history (e.g., after completing a major feature or release), remind the user to run `/compact` or start a fresh thread before beginning unrelated debugging so accumulated context is not re-billed on every step.
+
+---
+
+## 5. Multi-Monitor DPI & VST3 UI Scaling Standard (`Derive` ContentPanel Pattern)
+
+All Mauve Zone JUCE/VST3 plugins must follow the **`Derive` `ContentPanel` + `applyUiScale` architecture** for UI scaling on Windows multi-monitor setups:
+
+### Why Naive Host Resizing (`setResizable` + `AffineTransform` on an overlay canvas) Breaks Across Monitors
+1. **Host DPI / `ComponentBoundsConstrainer` Conflict (`WM_DPICHANGED`):** Calling `setResizable(true, true)`, `setResizeLimits(...)`, or `getConstrainer()->setFixedAspectRatio(...)` on `AudioProcessorEditor` interferes with JUCE's VST3 wrapper (`IPlugView::onSize` / `checkSizeConstraint`) when dragging a plugin window between monitors with different resolutions or Windows DPI scale factors. The constrainer clamps or alters editor bounds relative to the host `HWND` scale factor, desynchronizing `ComponentPeer` mouse coordinate mapping from child widgets.
+2. **Split Coordinate Space & Disabled Parent Hit-Testing (`canvas.setInterceptsMouseClicks(false, true)`):** Painting the chassis on the outer `AudioProcessorEditor` with manual `g.addTransform(...)` while placing widgets inside an `AffineTransform`-scaled transparent overlay `canvas` (with `setInterceptsMouseClicks(false, true)`) splits mouse and paint coordinate spaces and degrades hit-testing when bounds change or scale non-uniformly.
+3. **`setBounds` vs. `setTransform` Ordering:** Resetting `contentPanel.setTransform(juce::AffineTransform())` before `setBounds(0, 0, kBaseWidth, kBaseHeight)` and re-applying `setTransform(juce::AffineTransform::scale(uiScale))` guarantees logical child coordinates remain invariant.
+
+### Mandatory `Derive` Standard
+- **Never** call `setResizable`, `setResizeLimits`, or query `Desktop::getDisplays()` in the editor constructor to clamp initial size.
+- Wrap **all** painted background chrome, mouse interactions, and child controls inside a single `ContentPanel` child component (retaining default `setInterceptsMouseClicks(true, true)`) laid out strictly in unscaled base coordinates `(0, 0, kBaseWidth, kBaseHeight)`.
+- Outer `AudioProcessorEditor::paint` only fills the outer background color; `ContentPanel::paint` / `ContentPanel::resized` / `ContentPanel::mouseDown` delegate to `paintContent`, `resizedContent`, and `mouseDownContent` in base logical pixels.
+- Provide an explicit header scale selector (`scaleBox`: `75%`, `100%`, `125%`) calling `applyUiScale(newScale)` -> `setSize(round(kBaseWidth * uiScale), round(kBaseHeight * uiScale)); resized();`. Let the OS/DAW handle per-monitor DPI cleanly around fixed logical editor dimensions.

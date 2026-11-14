@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
 
 namespace
 {
@@ -21,11 +22,8 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
       deck3(p.getAPVTS()),
       deck4(p.getAPVTS())
 {
-    juce::LookAndFeel::setDefaultLookAndFeel(&lnf);
     setLookAndFeel(&lnf);
-
-    canvas.setInterceptsMouseClicks(false, true);
-    addAndMakeVisible(canvas);
+    addAndMakeVisible(contentPanel);
 
     // Signal Chain Order Selector (6 Permutations of Decks 1, 2, 3)
     chainBox.addItemList(juce::StringArray {
@@ -37,7 +35,7 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
         juce::String::fromUTF8("TAPE \xe2\x96\xb8 COMP \xe2\x96\xb8 PRE")
     }, 1);
     chainBox.setTooltip("Reorder Decks 1-3 in the Master Bus Signal Chain");
-    canvas.addAndMakeVisible(chainBox);
+    contentPanel.addAndMakeVisible(chainBox);
     chainAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         processorRef.getAPVTS(), IDs::chainOrder.getParamID(), chainBox);
 
@@ -51,7 +49,7 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
     }, 1);
     presetBox.setSelectedId(processorRef.getCurrentProgram() + 1, juce::dontSendNotification);
     presetBox.onChange = [this]() { applyFactoryPreset(presetBox.getSelectedId()); };
-    canvas.addAndMakeVisible(presetBox);
+    contentPanel.addAndMakeVisible(presetBox);
 
     // Oversampling buttons
     os2xBtn.setButtonText("2x");
@@ -65,9 +63,9 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
     os8xBtn.setClickingTogglesState(true);
     os4xBtn.setToggleState(true, juce::dontSendNotification);
 
-    canvas.addAndMakeVisible(os2xBtn);
-    canvas.addAndMakeVisible(os4xBtn);
-    canvas.addAndMakeVisible(os8xBtn);
+    contentPanel.addAndMakeVisible(os2xBtn);
+    contentPanel.addAndMakeVisible(os4xBtn);
+    contentPanel.addAndMakeVisible(os8xBtn);
 
     os2xBtn.onClick = [this]() {
         if (auto* param = processorRef.getAPVTS().getParameter(IDs::oversample.getParamID()))
@@ -91,8 +89,8 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
     msBtn.setClickingTogglesState(true);
     stereoBtn.setToggleState(true, juce::dontSendNotification);
 
-    canvas.addAndMakeVisible(stereoBtn);
-    canvas.addAndMakeVisible(msBtn);
+    contentPanel.addAndMakeVisible(stereoBtn);
+    contentPanel.addAndMakeVisible(msBtn);
 
     stereoBtn.onClick = [this]() {
         if (auto* param = processorRef.getAPVTS().getParameter(IDs::routingMode.getParamID()))
@@ -106,15 +104,32 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
     masterBypassBtn.setButtonText("BYPASS");
     masterBypassBtn.setClickingTogglesState(true);
     masterBypassBtn.setTooltip("Master Bypass (Latency-Compensated A/B Compare)");
-    canvas.addAndMakeVisible(masterBypassBtn);
+    contentPanel.addAndMakeVisible(masterBypassBtn);
     masterBypassAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         processorRef.getAPVTS(), IDs::bypass.getParamID(), masterBypassBtn);
 
+    scaleBox.addItem("75%", 1);
+    scaleBox.addItem("100%", 2);
+    scaleBox.addItem("125%", 3);
+    scaleBox.setSelectedId(2, juce::dontSendNotification);
+    scaleBox.setJustificationType(juce::Justification::centred);
+    scaleBox.setTooltip("UI Scale Factor");
+    scaleBox.onChange = [this]() {
+        switch (scaleBox.getSelectedId())
+        {
+            case 1: applyUiScale(0.75f); break;
+            case 2: applyUiScale(1.0f);  break;
+            case 3: applyUiScale(1.25f); break;
+            default: break;
+        }
+    };
+    contentPanel.addAndMakeVisible(scaleBox);
+
     // Decks & Swap Callbacks
-    canvas.addAndMakeVisible(deck1);
-    canvas.addAndMakeVisible(deck2);
-    canvas.addAndMakeVisible(deck3);
-    canvas.addAndMakeVisible(deck4);
+    contentPanel.addAndMakeVisible(deck1);
+    contentPanel.addAndMakeVisible(deck2);
+    contentPanel.addAndMakeVisible(deck3);
+    contentPanel.addAndMakeVisible(deck4);
 
     auto swapDeckByType = [this](int deckType)
     {
@@ -140,26 +155,7 @@ OxidationDeckAudioProcessorEditor::OxidationDeckAudioProcessorEditor(OxidationDe
     processorRef.getAPVTS().addParameterListener(IDs::oversample.getParamID(), this);
     processorRef.getAPVTS().addParameterListener(IDs::routingMode.getParamID(), this);
 
-    setResizable(true, true);
-    setResizeLimits(854, 399, 1952, 912);
-    getConstrainer()->setFixedAspectRatio(static_cast<double>(kBaseWidth) / static_cast<double>(kBaseHeight));
-
-    int initW = kBaseWidth;
-    int initH = kBaseHeight;
-    if (auto* disp = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-    {
-        auto userBounds = disp->userBounds;
-        if (userBounds.getWidth() < kBaseWidth + 40 || userBounds.getHeight() < kBaseHeight + 60)
-        {
-            double fitScale = juce::jmin((userBounds.getWidth() - 40.0) / static_cast<double>(kBaseWidth),
-                                         (userBounds.getHeight() - 60.0) / static_cast<double>(kBaseHeight));
-            fitScale = juce::jlimit(0.70, 1.0, fitScale);
-            initW = juce::roundToInt(kBaseWidth * fitScale);
-            initH = juce::roundToInt(kBaseHeight * fitScale);
-        }
-    }
-
-    setSize(initW, initH);
+    setSize(kBaseWidth, kBaseHeight);
     syncHeaderControls();
     startTimerHz(30);
 }
@@ -174,14 +170,10 @@ OxidationDeckAudioProcessorEditor::~OxidationDeckAudioProcessorEditor()
     setLookAndFeel(nullptr);
 }
 
-void OxidationDeckAudioProcessorEditor::mouseDown(const juce::MouseEvent& event)
+void OxidationDeckAudioProcessorEditor::mouseDownContent(const juce::MouseEvent& event)
 {
-    const float scaleX = static_cast<float>(getWidth())  / static_cast<float>(kBaseWidth);
-    const float scaleY = static_cast<float>(getHeight()) / static_cast<float>(kBaseHeight);
-    const float baseX  = static_cast<float>(event.x) / std::max(0.01f, scaleX);
-    const float baseY  = static_cast<float>(event.y) / std::max(0.01f, scaleY);
-
-    if (baseX >= 24.0f && baseX <= 160.0f && baseY >= 6.0f && baseY <= 46.0f)
+    if (event.position.x >= 24.0f && event.position.x <= 160.0f
+        && event.position.y >= 6.0f && event.position.y <= 46.0f)
     {
         if (auto* p = processorRef.getAPVTS().getParameter(IDs::bypass.getParamID()))
         {
@@ -201,8 +193,8 @@ void OxidationDeckAudioProcessorEditor::parameterChanged(const juce::String&, fl
         if (safeThis != nullptr)
         {
             safeThis->syncHeaderControls();
-            safeThis->resized();
-            safeThis->repaint();
+            safeThis->resizedContent();
+            safeThis->contentPanel.repaint();
         }
     });
 }
@@ -261,8 +253,16 @@ void OxidationDeckAudioProcessorEditor::applyFactoryPreset(int presetId)
 {
     processorRef.applyFactoryPreset(presetId - 1);
     syncHeaderControls();
+    resizedContent();
+    contentPanel.repaint();
+}
+
+void OxidationDeckAudioProcessorEditor::applyUiScale(float newScale)
+{
+    uiScale = newScale;
+    setSize(static_cast<int>(std::round(static_cast<float>(kBaseWidth) * uiScale)),
+            static_cast<int>(std::round(static_cast<float>(kBaseHeight) * uiScale)));
     resized();
-    repaint();
 }
 
 void OxidationDeckAudioProcessorEditor::timerCallback()
@@ -298,16 +298,19 @@ void OxidationDeckAudioProcessorEditor::timerCallback()
                           processorRef.getLimiterShortTermLufs(),
                           processorRef.getLimiterLra());
 
-    repaint();
+    contentPanel.repaint();
 }
 
 void OxidationDeckAudioProcessorEditor::resized()
 {
-    canvas.setBounds(0, 0, kBaseWidth, kBaseHeight);
-    const float scaleX = static_cast<float>(getWidth())  / static_cast<float>(kBaseWidth);
-    const float scaleY = static_cast<float>(getHeight()) / static_cast<float>(kBaseHeight);
-    canvas.setTransform(juce::AffineTransform::scale(scaleX, scaleY));
+    contentPanel.setTransform(juce::AffineTransform());
+    contentPanel.setBounds(0, 0, kBaseWidth, kBaseHeight);
+    contentPanel.setTransform(juce::AffineTransform::scale(uiScale));
+    resizedContent();
+}
 
+void OxidationDeckAudioProcessorEditor::resizedContent()
+{
     juce::Rectangle<int> area(0, 0, kBaseWidth, kBaseHeight);
 
     // 19-inch chassis inner area (leave 20px left and right for rack ears)
@@ -315,31 +318,35 @@ void OxidationDeckAudioProcessorEditor::resized()
 
     // Header bar (40px)
     auto headerArea = innerArea.removeFromTop(40);
-    headerArea.removeFromLeft(280); // brand logo space
+    headerArea.removeFromLeft(295); // brand logo & model badge space
 
     // Header controls aligned right
-    auto rightHeader = headerArea.removeFromRight(860);
+    auto rightHeader = headerArea.removeFromRight(875);
 
-    auto bypassArea = rightHeader.removeFromRight(62).reduced(0, 8);
+    auto scaleArea = rightHeader.removeFromRight(62).reduced(0, 7);
+    scaleBox.setBounds(scaleArea);
+    rightHeader.removeFromRight(8);
+
+    auto bypassArea = rightHeader.removeFromRight(60).reduced(0, 8);
     masterBypassBtn.setBounds(bypassArea);
+    rightHeader.removeFromRight(8);
+
+    auto msArea = rightHeader.removeFromRight(106).reduced(0, 8);
+    stereoBtn.setBounds(msArea.removeFromLeft(53));
+    msBtn.setBounds(msArea);
     rightHeader.removeFromRight(10);
 
-    auto msArea = rightHeader.removeFromRight(112).reduced(0, 8);
-    stereoBtn.setBounds(msArea.removeFromLeft(56));
-    msBtn.setBounds(msArea);
-    rightHeader.removeFromRight(12);
-
-    auto osArea = rightHeader.removeFromRight(96).reduced(0, 8);
+    auto osArea = rightHeader.removeFromRight(90).reduced(0, 8);
     int osBtnW = osArea.getWidth() / 3;
     os2xBtn.setBounds(osArea.removeFromLeft(osBtnW));
     os4xBtn.setBounds(osArea.removeFromLeft(osBtnW));
     os8xBtn.setBounds(osArea);
-    rightHeader.removeFromRight(14);
+    rightHeader.removeFromRight(10);
 
-    presetBox.setBounds(rightHeader.removeFromRight(235).reduced(0, 7));
-    rightHeader.removeFromRight(64); // space for PRESET label
+    presetBox.setBounds(rightHeader.removeFromRight(222).reduced(0, 7));
+    rightHeader.removeFromRight(60); // space for PRESET label
 
-    chainBox.setBounds(rightHeader.removeFromRight(195).reduced(0, 7));
+    chainBox.setBounds(rightHeader.removeFromRight(186).reduced(0, 7));
 
     // Footer status bar (36px)
     innerArea.removeFromBottom(36);
@@ -371,13 +378,13 @@ void OxidationDeckAudioProcessorEditor::resized()
 
 void OxidationDeckAudioProcessorEditor::paint(juce::Graphics& g)
 {
+    g.fillAll(MauveTheme::spaceBg);
+}
+
+void OxidationDeckAudioProcessorEditor::paintContent(juce::Graphics& g)
+{
     // Outer Space
     g.fillAll(MauveTheme::spaceBg);
-
-    juce::Graphics::ScopedSaveState state(g);
-    const float scaleX = static_cast<float>(getWidth())  / static_cast<float>(kBaseWidth);
-    const float scaleY = static_cast<float>(getHeight()) / static_cast<float>(kBaseHeight);
-    g.addTransform(juce::AffineTransform::scale(scaleX, scaleY));
 
     juce::Rectangle<float> totalBounds(0.0f, 0.0f, static_cast<float>(kBaseWidth), static_cast<float>(kBaseHeight));
 

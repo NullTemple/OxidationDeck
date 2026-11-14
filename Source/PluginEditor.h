@@ -18,12 +18,25 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
-    void mouseDown(const juce::MouseEvent& event) override;
 
     static constexpr int kBaseWidth  = 1220;
     static constexpr int kBaseHeight = 570;
 
 private:
+    struct ContentPanel final : public juce::Component
+    {
+        explicit ContentPanel(OxidationDeckAudioProcessorEditor& o) : owner(o) {}
+        void paint(juce::Graphics& g) override { owner.paintContent(g); }
+        void resized() override { owner.resizedContent(); }
+        void mouseDown(const juce::MouseEvent& e) override { owner.mouseDownContent(e); }
+        OxidationDeckAudioProcessorEditor& owner;
+    };
+
+    void paintContent(juce::Graphics& g);
+    void resizedContent();
+    void mouseDownContent(const juce::MouseEvent& event);
+    void applyUiScale(float newScale);
+
     void timerCallback() override;
     void parameterChanged(const juce::String& parameterID, float newValue) override;
     void syncHeaderControls();
@@ -32,7 +45,8 @@ private:
 
     OxidationDeckAudioProcessor& processorRef;
     MauveLookAndFeel lnf;
-    juce::Component canvas;
+    ContentPanel contentPanel { *this };
+    float uiScale = 1.0f;
 
     // Header Controls
     juce::ComboBox chainBox;
@@ -48,6 +62,8 @@ private:
 
     juce::TextButton masterBypassBtn;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> masterBypassAttach;
+
+    juce::ComboBox scaleBox;
 
     // The 4 Deck Panels
     Deck1Preamp   deck1;
