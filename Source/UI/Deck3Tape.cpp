@@ -88,9 +88,11 @@ void Deck3Tape::parameterChanged(const juce::String& parameterID, float newValue
 {
     if (parameterID == IDs::tapeSpeed.getParamID())
     {
-        juce::MessageManager::callAsync([this, val = juce::roundToInt(newValue)]()
+        juce::Component::SafePointer<Deck3Tape> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, val = juce::roundToInt(newValue)]()
         {
-            updateSpeedDisplay(val);
+            if (safeThis != nullptr)
+                safeThis->updateSpeedDisplay(val);
         });
     }
 }

@@ -87,7 +87,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         IDs::drive, "Drive",
-        juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 3.0f,
+        juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 3.2f,
         juce::AudioParameterFloatAttributes().withLabel("dB")));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
@@ -97,7 +97,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         IDs::preTilt, "Pre-Tilt",
-        juce::NormalisableRange<float>(-6.0f, 6.0f, 0.1f), 0.0f,
+        juce::NormalisableRange<float>(-6.0f, 6.0f, 0.1f), 0.4f,
         juce::AudioParameterFloatAttributes().withLabel("dB")));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
@@ -114,7 +114,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         IDs::compMode, "Compressor Mode",
-        juce::StringArray { "VCA", "Vari-Mu" }, 0));
+        juce::StringArray { "VCA", "Vari-Mu" }, 1));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         IDs::compThresh, "Threshold",
@@ -123,7 +123,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         IDs::compRatio, "Ratio",
-        juce::StringArray { "1.5:1", "2:1", "4:1", "10:1" }, 1));
+        juce::StringArray { "1.5:1", "2:1", "4:1", "10:1" }, 0));
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         IDs::compAttack, "Attack",
@@ -161,12 +161,12 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         IDs::tapeFlutter, "Wow & Flutter",
-        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 12.0f,
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 10.0f,
         juce::AudioParameterFloatAttributes().withLabel("%")));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         IDs::tapeWear, "Oxide Wear",
-        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 16.0f,
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 14.0f,
         juce::AudioParameterFloatAttributes().withLabel("%")));
 
     // --- Deck 4: True-Peak Limiter ---
@@ -180,7 +180,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         IDs::limInGain, "Input Gain",
-        juce::NormalisableRange<float>(-12.0f, 12.0f, 0.1f), 0.0f,
+        juce::NormalisableRange<float>(-12.0f, 12.0f, 0.1f), 0.5f,
         juce::AudioParameterFloatAttributes().withLabel("dB")));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(

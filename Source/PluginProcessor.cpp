@@ -96,11 +96,10 @@ void OxidationDeckAudioProcessor::prepareToPlay(double sampleRate, int samplesPe
     updateOversamplingChoice();
     if (oversamplers[currentOversampleIndex])
     {
-        auto* d4BypassP = apvts.getRawParameterValue(IDs::deck4Bypass.getParamID());
-        bool d4Bypassed = d4BypassP ? (d4BypassP->load() > 0.5f) : false;
         int totalLat = juce::roundToInt(oversamplers[currentOversampleIndex]->getLatencyInSamples())
-                     + (d4Bypassed ? 0 : limiterStage.getLatencySamples());
+                     + limiterStage.getLatencySamples();
         setLatencySamples(totalLat);
+        bypassDelay.setDelay(static_cast<float>(totalLat));
     }
 }
 
@@ -141,7 +140,10 @@ void OxidationDeckAudioProcessor::updateOversamplingChoice()
         if (oversamplers[currentOversampleIndex])
         {
             oversamplers[currentOversampleIndex]->reset();
-            setLatencySamples(juce::roundToInt(oversamplers[currentOversampleIndex]->getLatencyInSamples()));
+            int totalLat = juce::roundToInt(oversamplers[currentOversampleIndex]->getLatencyInSamples())
+                         + limiterStage.getLatencySamples();
+            setLatencySamples(totalLat);
+            bypassDelay.setDelay(static_cast<float>(totalLat));
 
             double oversampledRate = baseSampleRate * (1 << (currentOversampleIndex + 1));
             preampStage.setSampleRate(oversampledRate);
@@ -200,17 +202,10 @@ void OxidationDeckAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     auto* d4BypassP = apvts.getRawParameterValue(IDs::deck4Bypass.getParamID());
     bool d4Bypassed = d4BypassP ? (d4BypassP->load() > 0.5f) : false;
 
-    float osLatency = activeOversampler ? activeOversampler->getLatencyInSamples() : 0.0f;
-    int limLatency  = d4Bypassed ? 0 : limiterStage.getLatencySamples();
-    int totalLatency = juce::roundToInt(osLatency) + limLatency;
-    if (totalLatency != getLatencySamples())
-        setLatencySamples(totalLatency);
-
     if (isBypassed)
     {
         // Delay compensation during bypass maintains phase alignment with host mix
         juce::dsp::AudioBlock<float> block(buffer);
-        bypassDelay.setDelay(static_cast<float>(totalLatency));
         bypassDelay.process(juce::dsp::ProcessContextReplacing<float>(block));
 
         outPeakL.store(peakInL, std::memory_order_relaxed);
@@ -245,7 +240,10 @@ void OxidationDeckAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (targetOrder != currentChainOrder)
         {
             currentChainOrder = targetOrder;
-            chainTransitionGain = 0.15f; // Soft micro-dip for clickless topology swap
+            preampStage.reset();
+            dynamicsStage.reset();
+            tapeStage.reset();
+            chainTransitionGain = 0.0f; // Smooth fade-in after topology swap
         }
 
         // Stage execution lambdas (with internal per-sample clickless bypass & parameter smoothing)
@@ -368,12 +366,13 @@ void OxidationDeckAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     limiterStage.process(block, ceilingVal, inGainVal, lookaheadVal, releaseVal, d4Bypassed);
 
     // 7. Speaker Protection Safety Guard & Output Metering
+    const float transitionStep = 1.0f / std::max(32.0f, 0.005f * static_cast<float>(baseSampleRate));
     float peakOutL = 0.0f;
     float peakOutR = 0.0f;
     for (int i = 0; i < numSamples; ++i)
     {
         if (chainTransitionGain < 1.0f)
-            chainTransitionGain = std::min(1.0f, chainTransitionGain + 0.004f);
+            chainTransitionGain = std::min(1.0f, chainTransitionGain + transitionStep);
 
         float outL = std::isfinite(leftChannel[i])  ? (leftChannel[i] * chainTransitionGain)  : 0.0f;
         float outR = std::isfinite(rightChannel[i]) ? (rightChannel[i] * chainTransitionGain) : 0.0f;
@@ -413,7 +412,15 @@ void OxidationDeckAudioProcessor::setStateInformation(const void* data, int size
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
+    {
         apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+        if (auto* chainOrderP = apvts.getRawParameterValue(IDs::chainOrder.getParamID()))
+            currentChainOrder = juce::jlimit(0, 5, juce::roundToInt(chainOrderP->load()));
+        preampStage.reset();
+        dynamicsStage.reset();
+        tapeStage.reset();
+        limiterStage.reset();
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

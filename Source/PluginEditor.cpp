@@ -167,11 +167,15 @@ OxidationDeckAudioProcessorEditor::~OxidationDeckAudioProcessorEditor()
 
 void OxidationDeckAudioProcessorEditor::parameterChanged(const juce::String&, float)
 {
-    juce::MessageManager::callAsync([this]()
+    juce::Component::SafePointer<OxidationDeckAudioProcessorEditor> safeThis(this);
+    juce::MessageManager::callAsync([safeThis]()
     {
-        syncHeaderControls();
-        resized();
-        repaint();
+        if (safeThis != nullptr)
+        {
+            safeThis->syncHeaderControls();
+            safeThis->resized();
+            safeThis->repaint();
+        }
     });
 }
 
@@ -226,7 +230,12 @@ void OxidationDeckAudioProcessorEditor::applyFactoryPreset(int presetId)
     auto setParam = [this](const juce::ParameterID& id, float plainVal)
     {
         if (auto* p = processorRef.getAPVTS().getParameter(id.getParamID()))
-            p->setValueNotifyingHost(p->convertTo0to1(plainVal));
+        {
+            const float normVal = p->convertTo0to1(plainVal);
+            p->beginChangeGesture();
+            p->setValueNotifyingHost(normVal);
+            p->endChangeGesture();
+        }
     };
 
     // Ensure all decks active by default on preset load
@@ -362,6 +371,10 @@ void OxidationDeckAudioProcessorEditor::applyFactoryPreset(int presetId)
         default:
             break;
     }
+
+    syncHeaderControls();
+    resized();
+    repaint();
 }
 
 void OxidationDeckAudioProcessorEditor::timerCallback()

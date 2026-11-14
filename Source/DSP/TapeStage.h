@@ -157,19 +157,15 @@ public:
             delayBufferL[writeIndex] = inL;
             delayBufferR[writeIndex] = inR;
 
-            float delayedL = inL;
-            float delayedR = inR;
-            if (smoothFlutter > 1e-4f)
-            {
-                // Center delay scales smoothly with smoothFlutter so 0% flutter = 0 samples delay
-                float centerDelay = 18.0f * smoothFlutter;
-                float modDepth    = 14.0f * smoothFlutter;
-                float modDelay    = juce::jlimit(0.0f, (float)(delayBufferSize - 8),
-                                                 centerDelay + (wowState + flutterState) * modDepth);
+            // Fixed causal center delay (24 samples) prevents pitch-sweeps on preset change
+            // and guarantees readHermite4 never wraps past writeIndex into stale buffer samples.
+            const float centerDelay = 24.0f;
+            float modDepth          = 14.0f * smoothFlutter;
+            float modDelay          = juce::jlimit(4.0f, static_cast<float>(delayBufferSize - 8),
+                                                   centerDelay + (wowState + flutterState) * modDepth);
 
-                delayedL = readHermite4(delayBufferL.data(), delayBufferSize, (float)writeIndex - modDelay);
-                delayedR = readHermite4(delayBufferR.data(), delayBufferSize, (float)writeIndex - modDelay);
-            }
+            float delayedL = readHermite4(delayBufferL.data(), delayBufferSize, static_cast<float>(writeIndex) - modDelay);
+            float delayedR = readHermite4(delayBufferR.data(), delayBufferSize, static_cast<float>(writeIndex) - modDelay);
 
             writeIndex = (writeIndex + 1) % delayBufferSize;
 
@@ -259,12 +255,12 @@ private:
     float smoothCoeff        = 0.005f;
 
     int cachedSpeedMode = 1; // Default 30 IPS
-    float cachedWear    = 16.0f;
+    float cachedWear    = 14.0f;
 
     // Smoothed parameters
     float smoothDrive   = 1.5488f;
     float smoothBias    = 1.1885f;
-    float smoothFlutter = 0.12f;
+    float smoothFlutter = 0.10f;
     float smoothMakeup  = 0.80f;
     float smoothActive  = 1.0f;
 

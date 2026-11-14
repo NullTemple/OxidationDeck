@@ -29,11 +29,14 @@ public:
 
         // Maximum lookahead: 10 ms buffer + safety margin
         maxDelaySamples = static_cast<int>(std::ceil(currentSampleRate * 0.012)) + 64;
+        fixedLookaheadSamples = juce::jlimit(16, maxDelaySamples - 16, juce::roundToInt(0.005 * currentSampleRate));
         delayBufferL.assign(maxDelaySamples, 0.0f);
         delayBufferR.assign(maxDelaySamples, 0.0f);
+        dryDelayBufferL.assign(maxDelaySamples, 0.0f);
+        dryDelayBufferR.assign(maxDelaySamples, 0.0f);
         peakLookaheadBuffer.assign(maxDelaySamples, 1.0f);
 
-        smoothLookahead = static_cast<float>(2.0 * 0.001 * currentSampleRate);
+        smoothLookahead = static_cast<float>(juce::jlimit(8, fixedLookaheadSamples, juce::roundToInt(0.002 * currentSampleRate)));
         reset();
     }
 
@@ -43,6 +46,10 @@ public:
             std::fill(delayBufferL.begin(), delayBufferL.end(), 0.0f);
         if (!delayBufferR.empty())
             std::fill(delayBufferR.begin(), delayBufferR.end(), 0.0f);
+        if (!dryDelayBufferL.empty())
+            std::fill(dryDelayBufferL.begin(), dryDelayBufferL.end(), 0.0f);
+        if (!dryDelayBufferR.empty())
+            std::fill(dryDelayBufferR.begin(), dryDelayBufferR.end(), 0.0f);
         if (!peakLookaheadBuffer.empty())
             std::fill(peakLookaheadBuffer.begin(), peakLookaheadBuffer.end(), 1.0f);
 
@@ -93,7 +100,7 @@ public:
         // Target parameters
         const float targetInGain  = std::pow(10.0f, inGainDb * 0.05f);
         const float targetCeiling = std::pow(10.0f, ceilingDbTP * 0.05f);
-        const float targetLookSamples = juce::jlimit(8.0f, static_cast<float>(maxDelaySamples - 8),
+        const float targetLookSamples = juce::jlimit(8.0f, static_cast<float>(fixedLookaheadSamples),
                                                      static_cast<float>(lookaheadMs * 0.001f * currentSampleRate));
         const float targetActive = bypassed ? 0.0f : 1.0f;
 
@@ -115,10 +122,10 @@ public:
         {
             smoothInGain    += smoothCoeff * (targetInGain - smoothInGain);
             smoothCeiling   += smoothCoeff * (targetCeiling - smoothCeiling);
-            smoothLookahead += (smoothCoeff * 0.25f) * (targetLookSamples - smoothLookahead);
+            smoothLookahead += smoothCoeff * (targetLookSamples - smoothLookahead);
             smoothActive    += smoothCoeff * (targetActive - smoothActive);
 
-            int lookaheadInt = juce::jlimit(8, maxDelaySamples - 8, static_cast<int>(smoothLookahead));
+            int lookaheadInt = juce::jlimit(8, fixedLookaheadSamples, juce::roundToInt(smoothLookahead));
             float attackSlew = 1.0f / static_cast<float>(lookaheadInt);
 
             float rawL = std::isfinite(left[i])  ? left[i]  : 0.0f;
@@ -137,7 +144,9 @@ public:
 
             float peakVal = std::max(truePeakL, truePeakR);
 
-            // 2. Write current input into circular delay buffer
+            // 2. Write current input into fixed-latency circular delay buffers
+            dryDelayBufferL[writeIndex] = rawL;
+            dryDelayBufferR[writeIndex] = rawR;
             delayBufferL[writeIndex] = xInL;
             delayBufferR[writeIndex] = xInR;
 
@@ -154,18 +163,24 @@ public:
 
             peakLookaheadBuffer[writeIndex] = sampleTargetGain;
 
-            // 3. Scan lookahead window for upcoming peaks & compute exact distance-weighted slope
-            float windowMinGain = sampleTargetGain;
+            // 3. Scan lookahead window forward from readIdx & compute exact distance-weighted slope
+            int readIdx = (writeIndex - fixedLookaheadSamples + maxDelaySamples) % maxDelaySamples;
+            float windowMinGain = 1.0f;
             float requiredSlope = 0.0f;
             for (int k = 0; k <= lookaheadInt; ++k)
             {
-                int idx = writeIndex - k;
-                if (idx < 0) idx += maxDelaySamples;
+                int idx = readIdx + k;
+                if (idx >= maxDelaySamples)
+                    idx -= maxDelaySamples;
                 float g = peakLookaheadBuffer[idx];
-                windowMinGain = std::min(windowMinGain, g);
-                int distToExit = std::max(1, lookaheadInt - k);
+                if (g < windowMinGain)
+                    windowMinGain = g;
                 if (g < currentGain)
-                    requiredSlope = std::max(requiredSlope, (currentGain - g) / static_cast<float>(distToExit));
+                {
+                    float slope = (currentGain - g) / static_cast<float>(std::max(1, k));
+                    if (slope > requiredSlope)
+                        requiredSlope = slope;
+                }
             }
 
             // 4. Smooth Gain Ballistics (reaches exact peak attenuation right as peak exits delay line)
@@ -187,15 +202,11 @@ public:
 
             currentGain = juce::jlimit(0.01f, 1.0f, currentGain);
 
-            // 5. Read Delayed Audio with fractional linear interpolation for clickless lookahead sweeps
-            float readPos = static_cast<float>(writeIndex) - smoothLookahead;
-            while (readPos < 0.0f) readPos += static_cast<float>(maxDelaySamples);
-            int idx0 = static_cast<int>(readPos) % maxDelaySamples;
-            int idx1 = (idx0 + 1) % maxDelaySamples;
-            float frac = readPos - std::floor(readPos);
-
-            float delayedL = delayBufferL[idx0] + frac * (delayBufferL[idx1] - delayBufferL[idx0]);
-            float delayedR = delayBufferR[idx0] + frac * (delayBufferR[idx1] - delayBufferR[idx0]);
+            // 5. Read Delayed Audio from fixed lookahead offset (zero Doppler pitch shift)
+            float delayedL = delayBufferL[readIdx];
+            float delayedR = delayBufferR[readIdx];
+            float dryDelayedL = dryDelayBufferL[readIdx];
+            float dryDelayedR = dryDelayBufferR[readIdx];
 
             writeIndex = (writeIndex + 1) % maxDelaySamples;
 
@@ -209,9 +220,9 @@ public:
             if (std::abs(yLimR) > smoothCeiling)
                 yLimR = (yLimR >= 0.0f) ? smoothCeiling : -smoothCeiling;
 
-            // Clickless Bypass Crossfade
-            float yOutL = rawL + smoothActive * (yLimL - rawL);
-            float yOutR = rawR + smoothActive * (yLimR - rawR);
+            // Clickless Time-Aligned Bypass Crossfade
+            float yOutL = dryDelayedL + smoothActive * (yLimL - dryDelayedL);
+            float yOutR = dryDelayedR + smoothActive * (yLimR - dryDelayedR);
 
             left[i]  = yOutL;
             right[i] = yOutR;
@@ -260,7 +271,7 @@ public:
     }
 
     // Telemetry getters
-    int getLatencySamples() const noexcept { return juce::roundToInt(smoothLookahead); }
+    int getLatencySamples() const noexcept { return fixedLookaheadSamples; }
     float getGainReductionDb() const noexcept { return lastGRDb.load(std::memory_order_relaxed); }
     int getClipCount() const noexcept { return clipCount.load(std::memory_order_relaxed); }
     float getRadarNorm() const noexcept { return radarNorm.load(std::memory_order_relaxed); }
@@ -292,6 +303,7 @@ private:
     double currentSampleRate = 44100.0;
     float smoothCoeff = 0.005f;
     int maxDelaySamples = 4096;
+    int fixedLookaheadSamples = 220;
 
     float smoothInGain    = 1.0f;
     float smoothCeiling   = 0.89125f;
@@ -300,6 +312,8 @@ private:
 
     std::vector<float> delayBufferL;
     std::vector<float> delayBufferR;
+    std::vector<float> dryDelayBufferL;
+    std::vector<float> dryDelayBufferR;
     std::vector<float> peakLookaheadBuffer;
     int writeIndex = 0;
 

@@ -131,7 +131,12 @@ Deck2Dynamics::~Deck2Dynamics()
 
 void Deck2Dynamics::parameterChanged(const juce::String&, float)
 {
-    juce::MessageManager::callAsync([this]() { syncModeAndHpf(); });
+    juce::Component::SafePointer<Deck2Dynamics> safeThis(this);
+    juce::MessageManager::callAsync([safeThis]()
+    {
+        if (safeThis != nullptr)
+            safeThis->syncModeAndHpf();
+    });
 }
 
 void Deck2Dynamics::syncModeAndHpf()
