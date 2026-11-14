@@ -48,8 +48,8 @@ Deck3Tape::Deck3Tape(juce::AudioProcessorValueTreeState& apvts)
 
     satKnob.getSlider().setDoubleClickReturnValue(true, 3.8);
     biasCalKnob.getSlider().setDoubleClickReturnValue(true, 1.5);
-    flutterKnob.getSlider().setDoubleClickReturnValue(true, 12.0);
-    wearKnob.getSlider().setDoubleClickReturnValue(true, 16.0);
+    flutterKnob.getSlider().setDoubleClickReturnValue(true, 10.0);
+    wearKnob.getSlider().setDoubleClickReturnValue(true, 14.0);
 
     // Swap Deck Order Button
     swapBtn.setButtonText(juce::String::fromUTF8("\xe2\x87\x84"));

@@ -124,9 +124,9 @@ Deck1Preamp::Deck1Preamp(juce::AudioProcessorValueTreeState& apvts)
     bypassAttach   = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, IDs::deck1Bypass.getParamID(), bypassBtn);
 
     // Initial sync & drive/bias response + double-click reset values
-    driveKnob.getSlider().setDoubleClickReturnValue(true, 4.5);
-    biasKnob.getSlider().setDoubleClickReturnValue(true, 62.0);
-    pretiltKnob.getSlider().setDoubleClickReturnValue(true, 0.0);
+    driveKnob.getSlider().setDoubleClickReturnValue(true, 3.2);
+    biasKnob.getSlider().setDoubleClickReturnValue(true, 65.0);
+    pretiltKnob.getSlider().setDoubleClickReturnValue(true, 0.4);
     parallelKnob.getSlider().setDoubleClickReturnValue(true, 100.0);
 
     driveKnob.getSlider().onValueChange = [this, updateHarmScreen]() {

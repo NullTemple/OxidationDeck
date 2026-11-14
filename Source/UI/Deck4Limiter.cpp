@@ -40,7 +40,7 @@ Deck4Limiter::Deck4Limiter(juce::AudioProcessorValueTreeState& apvts)
     releaseAttach   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::limRelease.getParamID(), releaseKnob.getSlider());
 
     ceilingKnob.getSlider().setDoubleClickReturnValue(true, -1.0);
-    inGainKnob.getSlider().setDoubleClickReturnValue(true, 0.0);
+    inGainKnob.getSlider().setDoubleClickReturnValue(true, 0.5);
     lookaheadKnob.getSlider().setDoubleClickReturnValue(true, 2.0);
     releaseKnob.getSlider().setDoubleClickReturnValue(true, 3.0);
 

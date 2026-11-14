@@ -114,7 +114,7 @@ Deck2Dynamics::Deck2Dynamics(juce::AudioProcessorValueTreeState& apvts)
     bypassAttach  = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, IDs::deck2Bypass.getParamID(), bypassBtn);
 
     threshKnob.getSlider().setDoubleClickReturnValue(true, -14.0);
-    ratioKnob.getSlider().setDoubleClickReturnValue(true, 1.0);
+    ratioKnob.getSlider().setDoubleClickReturnValue(true, 0.0);
     attackKnob.getSlider().setDoubleClickReturnValue(true, 4.0);
     releaseKnob.getSlider().setDoubleClickReturnValue(true, 4.0);
 

@@ -38,22 +38,38 @@ double OxidationDeckAudioProcessor::getTailLengthSeconds() const
     return 0.0;
 }
 
+namespace
+{
+    static constexpr const char* kFactoryPresetNames[5] = {
+        "01: MASTER // 30 IPS TUBE GLUE",
+        "02: MASTER // VCA SNAP & IRON",
+        "03: MASTER // GERMANIUM VELVET",
+        "04: STEM // DRUM REEL PUNCH",
+        "05: EXPERIMENTAL // OXIDE SHED"
+    };
+}
+
 int OxidationDeckAudioProcessor::getNumPrograms()
 {
-    return 1;
+    return 5;
 }
 
 int OxidationDeckAudioProcessor::getCurrentProgram()
 {
-    return 0;
+    return currentProgramIndex;
 }
 
-void OxidationDeckAudioProcessor::setCurrentProgram(int /*index*/)
+void OxidationDeckAudioProcessor::setCurrentProgram(int index)
 {
+    int clamped = juce::jlimit(0, 4, index);
+    if (clamped != currentProgramIndex)
+        applyFactoryPreset(clamped);
 }
 
-const juce::String OxidationDeckAudioProcessor::getProgramName(int /*index*/)
+const juce::String OxidationDeckAudioProcessor::getProgramName(int index)
 {
+    if (index >= 0 && index < 5)
+        return kFactoryPresetNames[index];
     return {};
 }
 
@@ -401,8 +417,162 @@ juce::AudioProcessorEditor* OxidationDeckAudioProcessor::createEditor()
     return new OxidationDeckAudioProcessorEditor(*this);
 }
 
+void OxidationDeckAudioProcessor::applyFactoryPreset(int programIndex)
+{
+    programIndex = juce::jlimit(0, 4, programIndex);
+    currentProgramIndex = programIndex;
+    apvts.state.setProperty("preset_index", currentProgramIndex, nullptr);
+
+    auto setParam = [this](const juce::ParameterID& id, float plainVal)
+    {
+        if (auto* p = apvts.getParameter(id.getParamID()))
+        {
+            const float normVal = p->convertTo0to1(plainVal);
+            p->beginChangeGesture();
+            p->setValueNotifyingHost(normVal);
+            p->endChangeGesture();
+        }
+    };
+
+    // Ensure all decks active by default on preset load
+    setParam(IDs::deck1Bypass, 0.0f);
+    setParam(IDs::deck2Bypass, 0.0f);
+    setParam(IDs::deck3Bypass, 0.0f);
+    setParam(IDs::deck4Bypass, 0.0f);
+    setParam(IDs::compScListen, 0.0f);
+    setParam(IDs::autoGain, 1.0f);
+
+    const int presetId = programIndex + 1;
+    switch (presetId)
+    {
+        case 1: // 01: MASTER // 30 IPS TUBE GLUE
+            setParam(IDs::chainOrder, 0.0f);  // PRE > COMP > TAPE
+            setParam(IDs::flavor, 0.0f);      // Triode Class-A
+            setParam(IDs::drive, 3.2f);
+            setParam(IDs::bias, 65.0f);
+            setParam(IDs::preTilt, 0.4f);
+            setParam(IDs::parallelLine, 100.0f);
+            setParam(IDs::compMode, 1.0f);    // Vari-Mu
+            setParam(IDs::compThresh, -14.0f);
+            setParam(IDs::compRatio, 0.0f);   // 1.5:1
+            setParam(IDs::compAttack, 4.0f);  // 10 ms
+            setParam(IDs::compRelease, 4.0f); // Auto
+            setParam(IDs::compScHpf, 85.0f);
+            setParam(IDs::tapeSpeed, 1.0f);   // 30 IPS
+            setParam(IDs::tapeSat, 3.8f);
+            setParam(IDs::tapeBiasCal, 1.5f);
+            setParam(IDs::tapeFlutter, 10.0f);
+            setParam(IDs::tapeWear, 14.0f);
+            setParam(IDs::limCeiling, -1.0f);
+            setParam(IDs::limInGain, 0.5f);
+            setParam(IDs::limLookahead, 2.0f);
+            setParam(IDs::limRelease, 3.0f);  // Adaptive
+            break;
+
+        case 2: // 02: MASTER // VCA SNAP & IRON (Compressor before Preamp)
+            setParam(IDs::chainOrder, 2.0f);  // COMP > PRE > TAPE
+            setParam(IDs::flavor, 3.0f);      // Iron Core (Neve)
+            setParam(IDs::drive, 4.5f);
+            setParam(IDs::bias, 55.0f);
+            setParam(IDs::preTilt, 0.8f);
+            setParam(IDs::parallelLine, 90.0f);
+            setParam(IDs::compMode, 0.0f);    // VCA
+            setParam(IDs::compThresh, -16.0f);
+            setParam(IDs::compRatio, 1.0f);   // 2:1
+            setParam(IDs::compAttack, 5.0f);  // 30 ms
+            setParam(IDs::compRelease, 0.0f); // 100 ms
+            setParam(IDs::compScHpf, 120.0f);
+            setParam(IDs::tapeSpeed, 1.0f);   // 30 IPS
+            setParam(IDs::tapeSat, 3.0f);
+            setParam(IDs::tapeBiasCal, 2.0f);
+            setParam(IDs::tapeFlutter, 6.0f);
+            setParam(IDs::tapeWear, 10.0f);
+            setParam(IDs::limCeiling, -0.8f);
+            setParam(IDs::limInGain, 1.0f);
+            setParam(IDs::limLookahead, 1.5f);
+            setParam(IDs::limRelease, 0.0f);  // Fast
+            break;
+
+        case 3: // 03: MASTER // GERMANIUM VELVET (Pre > Tape > Comp)
+            setParam(IDs::chainOrder, 1.0f);  // PRE > TAPE > COMP
+            setParam(IDs::flavor, 7.0f);      // Germanium (TG)
+            setParam(IDs::drive, 5.2f);
+            setParam(IDs::bias, 70.0f);
+            setParam(IDs::preTilt, -0.6f);
+            setParam(IDs::parallelLine, 85.0f);
+            setParam(IDs::compMode, 1.0f);    // Vari-Mu
+            setParam(IDs::compThresh, -15.5f);
+            setParam(IDs::compRatio, 1.0f);   // 2:1
+            setParam(IDs::compAttack, 3.0f);  // 3 ms
+            setParam(IDs::compRelease, 4.0f); // Auto
+            setParam(IDs::compScHpf, 85.0f);
+            setParam(IDs::tapeSpeed, 0.0f);   // 15 IPS
+            setParam(IDs::tapeSat, 4.8f);
+            setParam(IDs::tapeBiasCal, 0.8f);
+            setParam(IDs::tapeFlutter, 16.0f);
+            setParam(IDs::tapeWear, 24.0f);
+            setParam(IDs::limCeiling, -1.0f);
+            setParam(IDs::limInGain, 0.8f);
+            setParam(IDs::limLookahead, 2.5f);
+            setParam(IDs::limRelease, 3.0f);  // Adaptive
+            break;
+
+        case 4: // 04: STEM // DRUM REEL PUNCH (Tape > Comp > Pre)
+            setParam(IDs::chainOrder, 5.0f);  // TAPE > COMP > PRE
+            setParam(IDs::flavor, 4.0f);      // Nickel Core (API)
+            setParam(IDs::drive, 6.5f);
+            setParam(IDs::bias, 50.0f);
+            setParam(IDs::preTilt, 1.2f);
+            setParam(IDs::parallelLine, 75.0f);
+            setParam(IDs::compMode, 0.0f);    // VCA
+            setParam(IDs::compThresh, -18.0f);
+            setParam(IDs::compRatio, 2.0f);   // 4:1
+            setParam(IDs::compAttack, 4.0f);  // 10 ms
+            setParam(IDs::compRelease, 0.0f); // 100 ms
+            setParam(IDs::compScHpf, 120.0f);
+            setParam(IDs::tapeSpeed, 0.0f);   // 15 IPS (38 Hz head bump!)
+            setParam(IDs::tapeSat, 6.5f);
+            setParam(IDs::tapeBiasCal, 0.0f);
+            setParam(IDs::tapeFlutter, 14.0f);
+            setParam(IDs::tapeWear, 20.0f);
+            setParam(IDs::limCeiling, -0.5f);
+            setParam(IDs::limInGain, 1.5f);
+            setParam(IDs::limLookahead, 1.0f);
+            setParam(IDs::limRelease, 0.0f);  // Fast
+            break;
+
+        case 5: // 05: EXPERIMENTAL // OXIDE SHED
+            setParam(IDs::chainOrder, 4.0f);  // TAPE > PRE > COMP
+            setParam(IDs::flavor, 10.0f);     // Oxide Rot & Breakdown
+            setParam(IDs::drive, 8.5f);
+            setParam(IDs::bias, 80.0f);
+            setParam(IDs::preTilt, -1.8f);
+            setParam(IDs::parallelLine, 65.0f);
+            setParam(IDs::compMode, 1.0f);    // Vari-Mu
+            setParam(IDs::compThresh, -20.0f);
+            setParam(IDs::compRatio, 2.0f);   // 4:1
+            setParam(IDs::compAttack, 2.0f);  // 1 ms
+            setParam(IDs::compRelease, 1.0f); // 300 ms
+            setParam(IDs::compScHpf, 60.0f);
+            setParam(IDs::tapeSpeed, 0.0f);   // 15 IPS
+            setParam(IDs::tapeSat, 9.0f);
+            setParam(IDs::tapeBiasCal, -1.5f);
+            setParam(IDs::tapeFlutter, 42.0f);
+            setParam(IDs::tapeWear, 58.0f);
+            setParam(IDs::limCeiling, -1.0f);
+            setParam(IDs::limInGain, 0.0f);
+            setParam(IDs::limLookahead, 3.0f);
+            setParam(IDs::limRelease, 3.0f);
+            break;
+
+        default:
+            break;
+    }
+}
+
 void OxidationDeckAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
+    apvts.state.setProperty("preset_index", currentProgramIndex, nullptr);
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
@@ -414,6 +584,7 @@ void OxidationDeckAudioProcessor::setStateInformation(const void* data, int size
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
     {
         apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+        currentProgramIndex = juce::jlimit(0, 4, static_cast<int>(apvts.state.getProperty("preset_index", 0)));
         if (auto* chainOrderP = apvts.getRawParameterValue(IDs::chainOrder.getParamID()))
             currentChainOrder = juce::jlimit(0, 5, juce::roundToInt(chainOrderP->load()));
         preampStage.reset();

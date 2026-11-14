@@ -42,6 +42,7 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
+    void applyFactoryPreset(int programIndex);
 
     // Live Telemetry Getters (Thread-Safe Lock-Free)
     float getInputPeakL() const noexcept    { return inPeakL.load(std::memory_order_relaxed); }
@@ -69,6 +70,7 @@ private:
     std::unique_ptr<juce::dsp::Oversampling<float>> oversamplers[3];
     int currentOversampleIndex = 1; // Default: 4x
     int currentChainOrder = 0;
+    int currentProgramIndex = 0;
     float chainTransitionGain = 1.0f;
     double baseSampleRate = 44100.0;
     int baseBlockSize = 512;
